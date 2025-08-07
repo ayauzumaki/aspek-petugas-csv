@@ -103,21 +103,7 @@ def main():
     tokenizer_sentimen = load_tokenizer(SENTIMEN_FOLDER)
     model_sentimen = load_model(SENTIMEN_FOLDER)
 
-    # Input manual
-    st.subheader("✏️ Input Manual")
-    text = st.text_area("Masukkan teks ulasan atau komentar:", height=150)
-
-    if st.button("Prediksi Input Manual"):
-        if not text.strip():
-            st.warning("Masukkan teks dulu ya!")
-        else:
-            aspek, sentimen = predict_aspek_sentimen(text, kamus_slang, tokenizer_aspek, model_aspek, tokenizer_sentimen, model_sentimen)
-            st.success(f"Aspek: **{aspek}**")
-            if aspek == "Petugas":
-                st.info(f"Sentimen terhadap petugas: **{sentimen}**")
-
     # Upload file CSV
-    st.markdown("---")
     st.subheader("📤 Upload File CSV (dengan kolom `text`)")
     uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
@@ -128,13 +114,15 @@ def main():
             return
 
         hasil = []
-        for _, row in df.iterrows():
-            aspek, sentimen = predict_aspek_sentimen(
-                row['text'], kamus_slang,
-                tokenizer_aspek, model_aspek,
-                tokenizer_sentimen, model_sentimen
-            )
-            hasil.append({"text": row['text'], "aspek": aspek, "sentimen": sentimen})
+
+        with st.spinner("🔍 Sedang memproses prediksi, mohon tunggu..."):
+            for _, row in df.iterrows():
+                aspek, sentimen = predict_aspek_sentimen(
+                    row['text'], kamus_slang,
+                    tokenizer_aspek, model_aspek,
+                    tokenizer_sentimen, model_sentimen
+                )
+                hasil.append({"text": row['text'], "aspek": aspek, "sentimen": sentimen})
 
         df_hasil = pd.DataFrame(hasil)
         st.success("✅ Prediksi selesai!")
