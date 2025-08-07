@@ -8,7 +8,6 @@ import pandas as pd
 from transformers import BertTokenizer, BertConfig, BertForSequenceClassification
 
 # ===================== MODEL URL =====================
-# Model Aspek
 ASPEK_FOLDER = "petugas_model"
 ASPEK_MODEL_FILES = {
     "config.json": "https://drive.google.com/uc?id=1-gaeEZS51znvhsvSdnez9XB-xKvR2Dih",
@@ -18,7 +17,6 @@ ASPEK_MODEL_FILES = {
     "tokenizer_config.json": "https://drive.google.com/uc?id=1-tHk4S9UMk3xdosTpkgeCkxsP3JWB2xJ"
 }
 
-# Model Sentimen
 SENTIMEN_FOLDER = "sentimen_petugas_model"
 SENTIMEN_MODEL_FILES = {
     "config.json": "https://drive.google.com/uc?id=1SQTrxi-SPteLDUsaSuyVJP6vz7B_HR-g",
@@ -70,55 +68,85 @@ def preprocess(text, kamus_slang):
     text = ' '.join([kamus_slang.get(word, word) for word in text.split()])
     return text.strip()
 
+def predict_aspek_sentimen(text, kamus_slang, tokenizer_aspek, model_aspek, tokenizer_sentimen, model_sentimen):
+    cleaned = preprocess(text, kamus_slang)
+
+    inputs_aspek = tokenizer_aspek(cleaned, return_tensors="pt", padding=True, truncation=True, max_length=128)
+    with torch.no_grad():
+        output_aspek = model_aspek(**inputs_aspek)
+    pred_aspek = torch.argmax(output_aspek.logits, dim=1).item()
+
+    if pred_aspek == 1:
+        inputs_sentimen = tokenizer_sentimen(cleaned, return_tensors="pt", padding=True, truncation=True, max_length=128)
+        with torch.no_grad():
+            output_sentimen = model_sentimen(**inputs_sentimen)
+        pred_sentimen = torch.argmax(output_sentimen.logits, dim=1).item()
+        sentimen = {2: "Positif", 0: "Negatif", 1: "Netral"}.get(pred_sentimen, "Tidak Diketahui")
+        return "Petugas", sentimen
+    else:
+        return "Bukan Petugas", "-"
+
 # ===================== APLIKASI STREAMLIT =====================
 def main():
     st.set_page_config(page_title="Prediksi Aspek dan Sentimen", layout="wide")
     st.title("🕋 Prediksi Aspek & Sentimen - Layanan Petugas Haji")
 
+    # Unduh model & kamus
     download_model(ASPEK_FOLDER, ASPEK_MODEL_FILES)
     download_model(SENTIMEN_FOLDER, SENTIMEN_MODEL_FILES)
     download_kamus()
 
+    # Load model
     kamus_slang = load_kamus()
-
     tokenizer_aspek = load_tokenizer(ASPEK_FOLDER)
     model_aspek = load_model(ASPEK_FOLDER)
-
     tokenizer_sentimen = load_tokenizer(SENTIMEN_FOLDER)
     model_sentimen = load_model(SENTIMEN_FOLDER)
 
+    # Input manual
+    st.subheader("✏️ Input Manual")
     text = st.text_area("Masukkan teks ulasan atau komentar:", height=150)
 
-    if st.button("Prediksi Aspek & Sentimen"):
+    if st.button("Prediksi Input Manual"):
         if not text.strip():
             st.warning("Masukkan teks dulu ya!")
+        else:
+            aspek, sentimen = predict_aspek_sentimen(text, kamus_slang, tokenizer_aspek, model_aspek, tokenizer_sentimen, model_sentimen)
+            st.success(f"Aspek: **{aspek}**")
+            if aspek == "Petugas":
+                st.info(f"Sentimen terhadap petugas: **{sentimen}**")
+
+    # Upload file CSV
+    st.markdown("---")
+    st.subheader("📤 Upload File CSV (dengan kolom `text`)")
+    uploaded_file = st.file_uploader("Upload CSV", type="csv")
+
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+        if 'text' not in df.columns:
+            st.error("⚠️ CSV harus memiliki kolom bernama 'text'")
             return
 
-        cleaned = preprocess(text, kamus_slang)
+        hasil = []
+        for _, row in df.iterrows():
+            aspek, sentimen = predict_aspek_sentimen(
+                row['text'], kamus_slang,
+                tokenizer_aspek, model_aspek,
+                tokenizer_sentimen, model_sentimen
+            )
+            hasil.append({"text": row['text'], "aspek": aspek, "sentimen": sentimen})
 
-        # Prediksi Aspek
-        inputs_aspek = tokenizer_aspek(cleaned, return_tensors="pt", padding=True, truncation=True, max_length=128)
-        with torch.no_grad():
-            output_aspek = model_aspek(**inputs_aspek)
-        pred_aspek = torch.argmax(output_aspek.logits, dim=1).item()
+        df_hasil = pd.DataFrame(hasil)
+        st.success("✅ Prediksi selesai!")
+        st.dataframe(df_hasil)
 
-        if pred_aspek == 1:
-            st.success("✅ Teks ini **termasuk aspek petugas.**")
-
-            # Prediksi Sentimen jika aspek sesuai
-            inputs_sentimen = tokenizer_sentimen(cleaned, return_tensors="pt", padding=True, truncation=True, max_length=128)
-            with torch.no_grad():
-                output_sentimen = model_sentimen(**inputs_sentimen)
-            pred_sentimen = torch.argmax(output_sentimen.logits, dim=1).item()
-
-            if pred_sentimen == 2:
-                st.success("Sentimen terhadap petugas: **Positif**")
-            elif pred_sentimen == 0:
-                st.error("Sentimen terhadap petugas: **Negatif**")
-            else:
-                st.warning("Sentimen tidak terdeteksi dengan pasti.")
-        else:
-            st.warning("⛔ Teks ini **tidak termasuk aspek petugas.**")
+        csv_hasil = df_hasil.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="💾 Download Hasil CSV",
+            data=csv_hasil,
+            file_name="hasil_prediksi_aspek_sentimen.csv",
+            mime='text/csv'
+        )
 
 if __name__ == "__main__":
     main()

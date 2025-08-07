@@ -1,5 +1,5 @@
 streamlit
+pandas
 torch
 transformers
 gdown
-pandas
