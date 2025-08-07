@@ -5,9 +5,9 @@ import gdown
 import streamlit as st
 import torch
 import pandas as pd
-from transformers import BertTokenizer, BertConfig, BertForSequenceClassification
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
+from transformers import AutoTokenizer, BertConfig, BertForSequenceClassification
 
 # ===================== MODEL URL =====================
 ASPEK_FOLDER = "petugas_model"
@@ -48,7 +48,7 @@ def download_kamus():
 
 @st.cache_resource(show_spinner=True)
 def load_tokenizer(folder):
-    return BertTokenizer.from_pretrained(folder)
+    return AutoTokenizer.from_pretrained(folder)
 
 @st.cache_resource(show_spinner=True)
 def load_model(folder):
@@ -88,6 +88,21 @@ def predict_aspek_sentimen(text, kamus_slang, tokenizer_aspek, model_aspek, toke
     else:
         return "Bukan Petugas", "-"
 
+def plot_pie_chart(data, title):
+    fig, ax = plt.subplots()
+    ax.pie(data.values(), labels=data.keys(), autopct='%1.1f%%', startangle=140, colors=plt.cm.Paired.colors)
+    ax.axis('equal')
+    plt.title(title)
+    st.pyplot(fig)
+
+def generate_wordcloud(texts):
+    text = " ".join(texts)
+    wc = WordCloud(width=800, height=400, background_color='white').generate(text)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.imshow(wc, interpolation='bilinear')
+    ax.axis("off")
+    st.pyplot(fig)
+
 # ===================== APLIKASI STREAMLIT =====================
 def main():
     st.set_page_config(page_title="Prediksi Aspek dan Sentimen", layout="wide")
@@ -106,7 +121,7 @@ def main():
     model_sentimen = load_model(SENTIMEN_FOLDER)
 
     # Upload file CSV
-    st.subheader("📤 Upload File CSV (dengan kolom `text`)")
+    st.subheader("📤 Upload File CSV (harus ada kolom `text`)")
     uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
     if uploaded_file is not None:
@@ -130,38 +145,28 @@ def main():
         st.success("✅ Prediksi selesai!")
         st.dataframe(df_hasil)
 
-        # -- Statistik Pie Chart Aspek --
+        # Statistik aspek
+        aspek_counts = df_hasil['aspek'].value_counts().to_dict()
         st.subheader("📊 Statistik Aspek")
-        aspek_counts = df_hasil['aspek'].value_counts()
-        fig1, ax1 = plt.subplots()
-        ax1.pie(aspek_counts, labels=aspek_counts.index, autopct='%1.1f%%', startangle=90, colors=['#66b3ff','#ff9999'])
-        ax1.axis('equal')
-        st.pyplot(fig1)
+        plot_pie_chart(aspek_counts, "Distribusi Aspek")
 
-        # -- Statistik Pie Chart Sentimen untuk Aspek Petugas --
+        # Statistik sentimen untuk aspek Petugas saja
+        sentimen_petugas = df_hasil[df_hasil['aspek'] == "Petugas"]['sentimen'].value_counts().to_dict()
         st.subheader("📊 Statistik Sentimen (Aspek Petugas)")
-        df_petugas = df_hasil[df_hasil['aspek'] == "Petugas"]
-        if not df_petugas.empty:
-            sentimen_counts = df_petugas['sentimen'].value_counts()
-            fig2, ax2 = plt.subplots()
-            ax2.pie(sentimen_counts, labels=sentimen_counts.index, autopct='%1.1f%%', startangle=90, colors=['#99ff99','#ffcc99','#cccccc'])
-            ax2.axis('equal')
-            st.pyplot(fig2)
+        if sentimen_petugas:
+            plot_pie_chart(sentimen_petugas, "Distribusi Sentimen Aspek Petugas")
         else:
-            st.info("Tidak ada data dengan aspek Petugas untuk ditampilkan statistik sentimen.")
+            st.write("Tidak ada data dengan aspek Petugas untuk ditampilkan.")
 
-        # -- Wordcloud untuk teks aspek Petugas --
-        st.subheader("☁️ Wordcloud Teks Aspek Petugas")
-        if not df_petugas.empty:
-            text_petugas = " ".join(df_petugas['text'].tolist())
-            wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text_petugas)
-            fig3, ax3 = plt.subplots(figsize=(10, 5))
-            ax3.imshow(wordcloud, interpolation='bilinear')
-            ax3.axis("off")
-            st.pyplot(fig3)
+        # Wordcloud untuk teks yang beraspek Petugas
+        st.subheader("☁️ WordCloud untuk Teks dengan Aspek Petugas")
+        texts_petugas = df_hasil[df_hasil['aspek'] == "Petugas"]['text'].tolist()
+        if texts_petugas:
+            generate_wordcloud(texts_petugas)
         else:
-            st.info("Tidak ada data dengan aspek Petugas untuk wordcloud.")
+            st.write("Tidak ada data dengan aspek Petugas untuk WordCloud.")
 
+        # Download hasil CSV
         csv_hasil = df_hasil.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="💾 Download Hasil CSV",
